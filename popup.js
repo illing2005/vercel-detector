@@ -1,9 +1,15 @@
-const STATUS_LABELS = {
-  none: "No Vercel signals detected",
-  possible: "Possibly hosted on Vercel",
-  likely: "Likely hosted on Vercel",
-  confirmed: "Vercel-hosted site confirmed",
-};
+function getStatusLabel(confidence, platforms) {
+  const names = platforms && platforms.length > 0
+    ? platforms.join(" & ")
+    : "breach-affected platform";
+
+  switch (confidence) {
+    case "confirmed": return `${names} site confirmed`;
+    case "likely": return `Likely a ${names} site`;
+    case "possible": return `Possibly built with ${names}`;
+    default: return "No breach-affected platforms detected";
+  }
+}
 
 chrome.runtime.sendMessage({ type: "GET_STATE_POPUP" }, (state) => {
   if (!state) return;
@@ -16,7 +22,7 @@ chrome.runtime.sendMessage({ type: "GET_STATE_POPUP" }, (state) => {
 
   statusEl.className = `status-bar status-${state.confidence}`;
   dot.className = `dot dot-${state.confidence}`;
-  statusText.textContent = STATUS_LABELS[state.confidence] || STATUS_LABELS.none;
+  statusText.textContent = getStatusLabel(state.confidence, state.platforms);
 
   if (state.url) {
     try {
@@ -32,6 +38,7 @@ chrome.runtime.sendMessage({ type: "GET_STATE_POPUP" }, (state) => {
         (s) => `
       <div class="signal-item">
         <span class="signal-type">${s.type}</span>
+        ${s.platform ? `<span class="signal-platform">${escapeHtml(s.platform)}</span>` : ""}
         <span class="signal-detail" title="${escapeAttr(s.detail)}">${escapeHtml(s.detail)}</span>
       </div>
     `

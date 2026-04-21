@@ -14,6 +14,7 @@
           type: "asset",
           detail: `Next.js asset: ${src.substring(0, 80)}`,
           weight: 30,
+          platform: "Vercel",
         });
         break;
       }
@@ -25,15 +26,102 @@
         type: "framework",
         detail: "__NEXT_DATA__ script tag found",
         weight: 30,
+        platform: "Vercel",
       });
     }
+
+    scanForLovableSignals(signals);
 
     if (signals.length > 0) {
       chrome.runtime.sendMessage({ type: "CONTENT_SIGNALS", signals });
     }
   }
 
-  function createOverlay(confidence, signals) {
+  function scanForLovableSignals(signals) {
+    const html = document.documentElement.outerHTML;
+
+    const scripts = document.querySelectorAll('script[src]');
+    for (const script of scripts) {
+      const src = script.getAttribute("src") || "";
+      if (src.includes("lovable-tagger") || src.includes("gptengineer")) {
+        signals.push({
+          type: "asset",
+          detail: `Lovable tagger script: ${src.substring(0, 80)}`,
+          weight: 100,
+          platform: "Lovable",
+        });
+        break;
+      }
+    }
+
+    const metaGenerator = document.querySelector('meta[name="generator"]');
+    if (metaGenerator) {
+      const content = (metaGenerator.getAttribute("content") || "").toLowerCase();
+      if (content.includes("lovable") || content.includes("gptengineer")) {
+        signals.push({
+          type: "meta",
+          detail: `Generator meta: ${metaGenerator.getAttribute("content")}`,
+          weight: 100,
+          platform: "Lovable",
+        });
+      }
+    }
+
+    if (html.includes("lovable.app") || html.includes("gptengineer.run")) {
+      const alreadyHasLovable = signals.some(
+        (s) => s.platform === "Lovable" && s.weight >= 100
+      );
+      if (!alreadyHasLovable) {
+        signals.push({
+          type: "reference",
+          detail: "Lovable platform reference found in page source",
+          weight: 40,
+          platform: "Lovable",
+        });
+      }
+    }
+
+    const rootEl = document.getElementById("root");
+    const hasViteModuleScript = document.querySelector('script[type="module"][src*="/src/"]');
+    if (rootEl && hasViteModuleScript) {
+      const bodyChildren = document.body ? document.body.children.length : 99;
+      if (bodyChildren <= 3) {
+        signals.push({
+          type: "framework",
+          detail: "Vite+React SPA shell (common Lovable pattern)",
+          weight: 20,
+          platform: "Lovable",
+        });
+      }
+    }
+
+    const allScripts = document.querySelectorAll("script");
+    for (const script of allScripts) {
+      const text = script.textContent || "";
+      if (text.includes("supabase") && text.includes("lovable")) {
+        signals.push({
+          type: "config",
+          detail: "Supabase + Lovable configuration found",
+          weight: 60,
+          platform: "Lovable",
+        });
+        break;
+      }
+    }
+  }
+
+  function buildOverlayTitle(platforms) {
+    if (platforms.length === 0) return "Breach-Affected Platform Detected";
+    return `${platforms.join(" & ")} Site Detected`;
+  }
+
+  function buildOverlayDescription(platforms) {
+    const names = platforms.length > 0 ? platforms.join(" and ") : "a breach-affected platform";
+    return `This website appears to be built with ${names}. Given the recent security incident${platforms.length > 1 ? "s" : ""},
+          proceed with caution &mdash; especially before entering credentials or sensitive data.`;
+  }
+
+  function createOverlay(confidence, signals, platforms) {
     if (overlayShown || sessionDismissed) return;
     overlayShown = true;
 
@@ -41,7 +129,10 @@
     overlay.id = "vercel-detector-overlay";
 
     const signalList = signals
-      .map((s) => `<li>${escapeHtml(s.detail)}</li>`)
+      .map((s) => {
+        const badge = s.platform ? `<span style="opacity:0.6">[${escapeHtml(s.platform)}]</span> ` : "";
+        return `<li>${badge}${escapeHtml(s.detail)}</li>`;
+      })
       .join("");
 
     const confidenceLabel =
@@ -175,11 +266,10 @@
       </style>
       <div class="vd-card">
         <div class="vd-icon">&#9888;&#65039;</div>
-        <div class="vd-title">Vercel-Hosted Site Detected</div>
+        <div class="vd-title">${escapeHtml(buildOverlayTitle(platforms))}</div>
         <span class="vd-badge">${confidenceLabel}</span>
         <p class="vd-desc">
-          This website appears to be hosted on Vercel. Given the recent security incident,
-          proceed with caution &mdash; especially before entering credentials or sensitive data.
+          ${buildOverlayDescription(platforms)}
         </p>
         <div class="vd-signals">
           <div class="vd-signals-title">Detection signals</div>
@@ -206,7 +296,7 @@
       overlay.remove();
       overlayShown = false;
       sessionDismissed = true;
-      chrome.runtime.sendMessage({ type: "DISMISSED" });
+      chrome.runtime.sendMessage({ type: "DISMISSED", platforms });
     });
   }
 
@@ -217,8 +307,8 @@
   }
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === "VERCEL_DETECTED") {
-      createOverlay(message.confidence, message.signals);
+    if (message.type === "PLATFORM_DETECTED") {
+      createOverlay(message.confidence, message.signals, message.platforms || []);
     }
   });
 
